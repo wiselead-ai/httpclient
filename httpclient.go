@@ -15,8 +15,8 @@ const (
 	defaultTimeout     = 15 * time.Second
 	defaultDialTimeout = 5 * time.Second
 	maxRetries         = 5
-	baseRetryDelay     = 2 * time.Second
-	maxRetryDelay      = 30 * time.Second
+	baseRetryDelay     = 500 * time.Millisecond
+	maxRetryDelay      = 5 * time.Second
 )
 
 type Option func(*http.Client)
@@ -165,20 +165,34 @@ func DoWithRetry(client *http.Client, req *http.Request) (*http.Response, error)
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		resp, err := client.Do(req)
 		if err == nil {
-			return resp, nil
+			if resp.StatusCode < 400 {
+				return resp, nil
+			}
+			lastErr = fmt.Errorf("unexpected status code %d", resp.StatusCode)
+			resp.Body.Close()
+		} else {
+			lastErr = err
 		}
 
-		lastErr = err
-		delay := time.Duration(float64(baseRetryDelay) * math.Pow(2, float64(attempt)))
-		if delay > maxRetryDelay {
-			delay = maxRetryDelay
-		}
-
-		select {
-		case <-req.Context().Done():
+		// Check context before waiting
+		if req.Context().Err() != nil {
 			return nil, fmt.Errorf("request cancelled or timed out: %w", req.Context().Err())
-		case <-time.After(delay):
-			continue
+		}
+
+		if attempt < maxRetries-1 { // Don't wait on last attempt
+			delay := time.Duration(float64(baseRetryDelay) * math.Pow(2, float64(attempt)))
+			if delay > maxRetryDelay {
+				delay = maxRetryDelay
+			}
+
+			ticker := time.NewTicker(delay)
+			select {
+			case <-ticker.C:
+			case <-req.Context().Done():
+				ticker.Stop()
+				return nil, fmt.Errorf("request cancelled or timed out: %w", req.Context().Err())
+			}
+			ticker.Stop()
 		}
 	}
 	return nil, fmt.Errorf("failed after %d retries: %w", maxRetries, lastErr)

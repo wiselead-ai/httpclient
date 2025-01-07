@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"net/http/httptest"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,9 +20,7 @@ func TestClient(t *testing.T) {
 		t.Parallel()
 
 		httpClient := New()
-
 		transport := httpClient.Transport.(*http.Transport)
-
 		require.NotNil(t, httpClient)
 
 		assert.Equal(t, 15*time.Second, httpClient.Timeout)
@@ -31,7 +31,6 @@ func TestClient(t *testing.T) {
 		t.Parallel()
 
 		httpClient := New(WithTimeout(1 * time.Second))
-
 		assert.Equal(t, 1*time.Second, httpClient.Timeout)
 	})
 
@@ -39,9 +38,7 @@ func TestClient(t *testing.T) {
 		t.Parallel()
 
 		httpClient := New(WithTLSHandshakeTimeout(1 * time.Second))
-
 		transport := httpClient.Transport.(*http.Transport)
-
 		assert.Equal(t, 1*time.Second, transport.TLSHandshakeTimeout)
 	})
 
@@ -49,9 +46,7 @@ func TestClient(t *testing.T) {
 		t.Parallel()
 
 		httpClient := New(WithResponseHeaderTimeout(1 * time.Second))
-
 		transport := httpClient.Transport.(*http.Transport)
-
 		assert.Equal(t, 1*time.Second, transport.ResponseHeaderTimeout)
 	})
 
@@ -59,9 +54,7 @@ func TestClient(t *testing.T) {
 		t.Parallel()
 
 		httpClient := New(WithIdleConnTimeout(1 * time.Second))
-
 		transport := httpClient.Transport.(*http.Transport)
-
 		assert.Equal(t, 1*time.Second, transport.IdleConnTimeout)
 	})
 
@@ -69,9 +62,7 @@ func TestClient(t *testing.T) {
 		t.Parallel()
 
 		httpClient := New(WithMaxIdleConns(100))
-
 		transport := httpClient.Transport.(*http.Transport)
-
 		assert.Equal(t, 100, transport.MaxIdleConns)
 	})
 
@@ -79,9 +70,7 @@ func TestClient(t *testing.T) {
 		t.Parallel()
 
 		httpClient := New(WithMaxIdleConnsPerHost(100))
-
 		transport := httpClient.Transport.(*http.Transport)
-
 		assert.Equal(t, 100, transport.MaxIdleConnsPerHost)
 	})
 
@@ -89,23 +78,20 @@ func TestClient(t *testing.T) {
 		t.Parallel()
 
 		httpClient := New(WithForceHTTP2Disabled())
-
 		transport := httpClient.Transport.(*http.Transport)
-
 		assert.Equal(t, false, transport.ForceAttemptHTTP2)
 	})
 
 	t.Run("WithCustomTransport", func(t *testing.T) {
 		t.Parallel()
 
-		customTransport := &http.Transport{
+		customTransport := http.Transport{
 			MaxIdleConns:    200,
 			IdleConnTimeout: 30 * time.Second,
 		}
 
-		httpClient := New(WithTransport(customTransport))
-
-		assert.Equal(t, customTransport, httpClient.Transport)
+		httpClient := New(WithTransport(&customTransport))
+		assert.Equal(t, &customTransport, httpClient.Transport)
 	})
 
 	t.Run("WithExpectContinueTimeout", func(t *testing.T) {
@@ -113,7 +99,6 @@ func TestClient(t *testing.T) {
 
 		httpClient := New(WithExpectContinueTimeout(2 * time.Second))
 		transport := httpClient.Transport.(*http.Transport)
-
 		assert.Equal(t, 2*time.Second, transport.ExpectContinueTimeout)
 	})
 
@@ -137,14 +122,11 @@ func TestClient(t *testing.T) {
 
 		expectedTimeout := 1 * time.Second
 		httpClient := New(WithDialerTimeout(expectedTimeout))
-		_ = httpClient.Transport.(*http.Transport) // type assertion to ensure transport is valid
+		_ = httpClient.Transport.(*http.Transport)
 
-		// Create a new dialer with the same settings to compare
 		expectedDialer := &net.Dialer{
-			Timeout:   expectedTimeout,
-			KeepAlive: defaultKeepAlive,
+			Timeout: expectedTimeout,
 		}
-
 		assert.Equal(t, expectedDialer.Timeout, expectedTimeout)
 	})
 
@@ -155,12 +137,43 @@ func TestClient(t *testing.T) {
 		httpClient := New(WithDialerKeepAlive(expectedKeepAlive))
 		_ = httpClient.Transport.(*http.Transport) // type assertion to ensure transport is valid
 
-		// Create a new dialer with the same settings to compare
 		expectedDialer := &net.Dialer{
-			Timeout:   defaultDialTimeout,
 			KeepAlive: expectedKeepAlive,
 		}
-
 		assert.Equal(t, expectedDialer.KeepAlive, expectedKeepAlive)
+	})
+
+	t.Run("DoWithRetry success", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer server.Close()
+
+		client := New()
+		req, err := http.NewRequest("GET", server.URL, nil)
+		require.NoError(t, err)
+
+		resp, doErr := DoWithRetry(client, req)
+		require.NoError(t, doErr)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("DoWithRetry fail after all retries", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "some error", http.StatusInternalServerError)
+		}))
+		defer server.Close()
+
+		client := New(WithTimeout(2 * time.Second))
+		req, err := http.NewRequest("GET", server.URL, nil)
+		require.NoError(t, err)
+
+		resp, doErr := DoWithRetry(client, req)
+		require.Error(t, doErr)
+		assert.Nil(t, resp)
 	})
 }
