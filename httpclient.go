@@ -2,6 +2,7 @@ package httpclient
 
 import (
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"net/http"
@@ -168,8 +169,10 @@ func DoWithRetry(client *http.Client, req *http.Request) (*http.Response, error)
 			if resp.StatusCode < 400 {
 				return resp, nil
 			}
-			lastErr = fmt.Errorf("unexpected status code %d", resp.StatusCode)
+			// Drain the body before closing
+			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
+			lastErr = fmt.Errorf("unexpected status code %d", resp.StatusCode)
 		} else {
 			lastErr = err
 		}

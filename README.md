@@ -65,6 +65,7 @@ The client implements a sophisticated retry mechanism with the following charact
 - Automatically closes response bodies between retries
 
 Example with context:
+
 ```go
 ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 defer cancel()
