@@ -15,9 +15,9 @@ const (
 	defaultTLSTimeout  = 5 * time.Second
 	defaultTimeout     = 15 * time.Second
 	defaultDialTimeout = 5 * time.Second
-	maxRetries         = 5
-	baseRetryDelay     = 500 * time.Millisecond
-	maxRetryDelay      = 5 * time.Second
+	maxRetries         = 10
+	baseRetryDelay     = time.Second
+	maxRetryDelay      = 15 * time.Second
 )
 
 type Option func(*http.Client)
